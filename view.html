@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>📅 면접 일정 조회</title>
+
+<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js"></script>
+<link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.css" rel="stylesheet">
+
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+
+<style>
+body { font-family: Arial; background:#f4f6f9; margin:0; }
+
+#topBar {
+  background:white;
+  padding:15px 20px;
+  box-shadow:0 2px 5px rgba(0,0,0,0.1);
+}
+
+#controls {
+  display:flex;
+  gap:10px;
+  margin-top:10px;
+}
+
+#main {
+  display:flex;
+  gap:20px;
+  padding:20px;
+}
+
+#calendar {
+  flex:1;
+  background:white;
+  padding:15px;
+  border-radius:10px;
+}
+
+#sidePanel {
+  width:300px;
+  background:white;
+  padding:15px;
+  border-radius:10px;
+  height:85vh;
+  overflow-y:auto;
+}
+
+.fc .fc-button {
+  background:#e8eaed;
+  border:none;
+  border-radius:20px;
+}
+
+.fc .fc-today-button {
+  background:#1a73e8 !important;
+  color:white !important;
+}
+
+.today-highlight { background:#fff3cd !important; }
+</style>
+</head>
+
+<body>
+
+<div id="topBar">
+  <h2>📅 면접 일정 조회</h2>
+
+  <div id="controls">
+    <select id="classFilter"><option value="all">전체 반</option></select>
+    <input id="nameFilter" placeholder="이름 검색">
+  </div>
+</div>
+
+<div id="main">
+  <div id="calendar"></div>
+
+  <div id="sidePanel">
+    <h3 id="selectedDateTitle">날짜 선택</h3>
+    <div id="dayList">날짜를 클릭하세요</div>
+  </div>
+</div>
+
+<script>
+// Firebase 설정 (관리자 페이지와 동일하게!)
+const firebaseConfig = {
+  apiKey: "YOUR_KEY",
+  authDomain: "YOUR_DOMAIN",
+  projectId: "YOUR_ID"
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+
+let calendar;
+let allData = [];
+let selectedDate = null;
+
+// 캘린더
+function initCalendar(){
+  calendar = new FullCalendar.Calendar(document.getElementById('calendar'), {
+    initialView:'dayGridMonth',
+    locale:'ko',
+
+    headerToolbar:{
+      left:'',
+      center:'prev title next',
+      right:'today'
+    },
+
+    dayCellClassNames(arg){
+      const today = new Date().toISOString().split('T')[0];
+      if(arg.dateStr===today) return ['today-highlight'];
+    },
+
+    dateClick(info){
+      selectedDate = info.dateStr;
+      selectedDateTitle.innerText = info.dateStr + " 일정";
+      renderDayList();
+    }
+  });
+
+  calendar.render();
+}
+
+// 목록
+function renderDayList(){
+  const list = allData.filter(e=>e.date===selectedDate);
+
+  if(list.length===0){
+    dayList.innerHTML="일정 없음";
+    return;
+  }
+
+  dayList.innerHTML = list.map(e =>
+    `<b>${e.name}</b><br>
+     ${e.university||''} ${e.major||''}<br>
+     ${e.class}반 ${e.number}번 (${e.type})`
+  ).join('<hr>');
+}
+
+// 반 필터
+function updateClassFilter(){
+  const classes = [...new Set(allData.map(e=>e.class))]
+    .filter(c=>c!=null)
+    .sort((a,b)=>Number(a)-Number(b));
+
+  classFilter.innerHTML='<option value="all">전체 반</option>';
+
+  classes.forEach(c=>{
+    const opt=document.createElement('option');
+    opt.value=c;
+    opt.textContent=c+'반';
+    classFilter.appendChild(opt);
+  });
+}
+
+// 렌더
+function renderEvents(){
+  const c = classFilter.value;
+  const n = nameFilter.value;
+
+  const filtered = allData.filter(e =>
+    (c==='all'||e.class==c) &&
+    (!n || e.name.includes(n))
+  );
+
+  calendar.removeAllEvents();
+
+  calendar.addEventSource(filtered.map(e=>{
+    let color='#999';
+    if(e.type==='면접') color='#34a853';
+    if(e.type==='실기') color='#4285f4';
+    if(e.type==='논술') color='#ea4335';
+
+    return {
+      title:`${e.name}`,
+      start:e.date,
+      backgroundColor:color
+    };
+  }));
+}
+
+// 실시간 조회
+db.collection('events').onSnapshot(snap=>{
+  allData = snap.docs.map(d=>d.data());
+  updateClassFilter();
+  renderEvents();
+  renderDayList();
+});
+
+classFilter.onchange = renderEvents;
+nameFilter.oninput = renderEvents;
+
+initCalendar();
+</script>
+
+</body>
+</html>
