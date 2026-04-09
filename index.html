@@ -46,15 +46,45 @@ body { font-family: Arial; background:#f4f6f9; margin:0; }
 
 .fc .fc-button {
   background:#e8eaed;
+  color:#202124;
   border:none;
   border-radius:20px;
+  font-weight:500;
+  padding:6px 12px;
+}
+.fc .fc-button:hover {
+  background:#d2e3fc;
+  color:#1967d2;
+}
+.fc .fc-button-primary:not(:disabled).fc-button-active {
+  background:#1a73e8;
+  color:white;
 }
 .fc .fc-today-button {
   background:#1a73e8 !important;
   color:white !important;
+  font-weight:bold;
 }
 
-.type-btn { opacity:0.6; }
+.fc .fc-toolbar-title {
+  margin:0 15px;
+  font-size:20px;
+  font-weight:bold;
+}
+.fc .fc-toolbar-chunk {
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+
+.type-btn {
+  padding:6px 10px;
+  margin:3px;
+  border-radius:20px;
+  border:none;
+  cursor:pointer;
+  opacity:0.6;
+}
 .type-btn.active { opacity:1; font-weight:bold; }
 
 .green { background:#34a853; color:white; }
@@ -75,8 +105,6 @@ body { font-family: Arial; background:#f4f6f9; margin:0; }
     <input id="nameFilter" placeholder="이름 검색">
     <input type="file" id="fileInput">
     <button onclick="downloadExcel()">엑셀 다운로드</button>
-    <button onclick="deleteAllEvents()" style="background:#ea4335;color:white;">전체 삭제</button>
-    <button onclick="deleteLastUpload()" style="background:#fbbc05;">최근 업로드 삭제</button>
   </div>
 </div>
 
@@ -106,10 +134,11 @@ body { font-family: Arial; background:#f4f6f9; margin:0; }
 </div>
 
 <script>
+// Firebase 설정
 const firebaseConfig = {
-  apiKey: "AIza...",
-  authDomain: "hexagon-8d950.firebaseapp.com",
-  projectId: "hexagon-8d950"
+  apiKey: "YOUR_KEY",
+  authDomain: "YOUR_DOMAIN",
+  projectId: "YOUR_ID"
 };
 
 firebase.initializeApp(firebaseConfig);
@@ -119,15 +148,6 @@ let calendar;
 let allData = [];
 let selectedDate = null;
 let selectedType = null;
-
-// ✅ 중복 체크
-function isDuplicate(data){
-  return allData.some(e =>
-    e.name === data.name &&
-    e.date === data.date &&
-    e.type === data.type
-  );
-}
 
 // 날짜 파싱
 function parseDate(d){
@@ -162,6 +182,11 @@ function initCalendar(){
       right:'today'
     },
 
+    dayCellClassNames(arg){
+      const today = new Date().toISOString().split('T')[0];
+      if(arg.dateStr===today) return ['today-highlight'];
+    },
+
     dateClick(info){
       selectedDate = info.dateStr;
       selectedDateTitle.innerText = info.dateStr + " 일정";
@@ -172,17 +197,23 @@ function initCalendar(){
       if(confirm("삭제하시겠습니까?")){
         db.collection('events').doc(info.event.id).delete();
       }
+    },
+
+    eventDrop(info){
+      db.collection('events').doc(info.event.id)
+        .update({date:info.event.startStr});
     }
   });
 
   calendar.render();
 }
 
-// 일정 추가 (중복 방지)
+// 일정 추가
 function addEvent(){
-  if(!selectedDate || !selectedType) return;
+  if(!selectedDate){ alert("날짜 선택"); return; }
+  if(!selectedType){ alert("유형 선택"); return; }
 
-  const newData = {
+  db.collection('events').add({
     name:m_name.value,
     university:m_university.value,
     major:m_major.value,
@@ -190,64 +221,87 @@ function addEvent(){
     number:m_number.value,
     type:selectedType,
     date:selectedDate
-  };
+  });
 
-  if(isDuplicate(newData)){
-    alert("이미 존재하는 일정");
-    return;
-  }
-
-  db.collection('events').add(newData);
+  m_name.value="";
+  m_university.value="";
+  m_major.value="";
+  m_class.value="";
+  m_number.value="";
+  selectedType=null;
+  document.querySelectorAll('.type-btn').forEach(btn=>btn.classList.remove('active'));
 }
 
 // 목록
 function renderDayList(){
   const list = allData.filter(e=>e.date===selectedDate);
-  dayList.innerHTML = list.length
-    ? list.map(e=>`${e.name} (${e.type})`).join('<br>')
-    : "일정 없음";
+
+  if(list.length===0){
+    dayList.innerHTML="일정 없음";
+    return;
+  }
+
+  dayList.innerHTML = list.map(e =>
+    `${e.class}반 ${e.number}번 ${e.name}<br>
+     ${e.university||''} ${e.major||''} (${e.type})`
+  ).join('<hr>');
 }
 
-// 필터
+// 반 필터 정렬
+function updateClassFilter(){
+  const classes = [...new Set(allData.map(e=>e.class))]
+    .filter(c=>c!=null)
+    .sort((a,b)=>Number(a)-Number(b));
+
+  classFilter.innerHTML='<option value="all">전체 반</option>';
+
+  classes.forEach(c=>{
+    const opt=document.createElement('option');
+    opt.value=c;
+    opt.textContent=c+'반';
+    classFilter.appendChild(opt);
+  });
+}
+
+// 캘린더 렌더
 function renderEvents(){
+  const c = classFilter.value;
+  const n = nameFilter.value;
+
+  const filtered = allData.filter(e =>
+    (c==='all'||e.class==c) &&
+    (!n || e.name.includes(n))
+  );
+
   calendar.removeAllEvents();
-  calendar.addEventSource(allData.map(e=>({
-    id:e.id,
-    title:e.name,
-    start:e.date
-  })));
+
+  calendar.addEventSource(filtered.map(e=>{
+    let color='#999';
+    if(e.type==='면접') color='#34a853';
+    if(e.type==='실기') color='#4285f4';
+    if(e.type==='논술') color='#ea4335';
+
+    return {
+      id:e.id,
+      title:`${e.name}\n${e.university||''} ${e.major||''}`,
+      start:e.date,
+      backgroundColor:color
+    };
+  }));
 }
 
 // 실시간
 db.collection('events').onSnapshot(snap=>{
   allData = snap.docs.map(d=>({id:d.id,...d.data()}));
+  updateClassFilter();
   renderEvents();
   renderDayList();
 });
 
-// ✅ 전체 삭제
-async function deleteAllEvents(){
-  if(!confirm("전체 삭제?")) return;
-  const snap = await db.collection('events').get();
-  const batch = db.batch();
-  snap.docs.forEach(doc=>batch.delete(doc.ref));
-  await batch.commit();
-}
+classFilter.onchange = renderEvents;
+nameFilter.oninput = renderEvents;
 
-// ✅ 업로드 삭제
-async function deleteLastUpload(){
-  const ids = allData.map(e=>e.uploadId).filter(Boolean);
-  if(ids.length===0){ alert("업로드 없음"); return; }
-
-  const latest = Math.max(...ids);
-  const snap = await db.collection('events').where('uploadId','==',latest).get();
-
-  const batch = db.batch();
-  snap.docs.forEach(doc=>batch.delete(doc.ref));
-  await batch.commit();
-}
-
-// 엑셀 업로드
+// ⭐ 엑셀 업로드 (불합격 필터 포함)
 fileInput.addEventListener('change', e=>{
   const reader=new FileReader();
 
@@ -256,31 +310,72 @@ fileInput.addEventListener('change', e=>{
     const sheet=wb.Sheets[wb.SheetNames[0]];
     const json=XLSX.utils.sheet_to_json(sheet);
 
-    const uploadId = Date.now();
+    function getValue(row, keys){
+      for(let k of keys){
+        if(row[k]!==undefined) return row[k];
+      }
+      return null;
+    }
 
     json.forEach(row=>{
+
+      // 🔥 불합격 필터
+      const stage = getValue(row,['1단계','1단계 결과','결과']);
+      if(stage && String(stage).includes('불합격')){
+        return; // 이 행은 무시
+      }
+
       const base={
-        class:row['반'],
-        number:row['번호'],
-        name:row['이름']
+        class:getValue(row,['반']),
+        number:getValue(row,['번호']),
+        name:getValue(row,['이름','성명']),
+        university:getValue(row,['대학명','학교']),
+        major:getValue(row,['모집단위','학과'])
       };
 
       ['면접','실기','논술'].forEach(type=>{
-        const date=parseDate(row[type+'일자']);
+        const date=parseDate(getValue(row,[type+'일자',type]));
         if(date){
-          const newData={...base,type,date};
-          if(!isDuplicate(newData)){
-            db.collection('events').add({...newData,uploadId});
-          }
+          db.collection('events').add({...base,type,date});
         }
       });
     });
 
-    alert("업로드 완료");
+    alert("엑셀 업로드 완료");
   };
 
   reader.readAsArrayBuffer(e.target.files[0]);
 });
+
+// 다운로드
+function downloadExcel(){
+  if(allData.length===0){
+    alert("데이터 없음");
+    return;
+  }
+
+  const sorted = [...allData].sort((a,b)=>{
+    if(a.date !== b.date) return a.date.localeCompare(b.date);
+    if(Number(a.class) !== Number(b.class)) return Number(a.class)-Number(b.class);
+    return Number(a.number)-Number(b.number);
+  });
+
+  const data = sorted.map(e=>({
+    날짜:e.date,
+    반:e.class,
+    번호:e.number,
+    이름:e.name,
+    대학명:e.university||'',
+    모집단위:e.major||'',
+    유형:e.type
+  }));
+
+  const ws = XLSX.utils.json_to_sheet(data);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "일정");
+
+  XLSX.writeFile(wb, "면접일정.xlsx");
+}
 
 initCalendar();
 </script>
